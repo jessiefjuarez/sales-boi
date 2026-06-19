@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AgencyFlow — AI sales assistant for solo creatives</title>
+  <meta name="description" content="A prospecting tool + lightweight CRM for a remote video editor landing agency clients." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body data-theme="light">
+  <!-- ============ Sidebar ============ -->
+  <aside class="sidebar" aria-label="Primary navigation">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">AgencyFlow</span>
+    </div>
+
+    <nav class="nav" id="nav">
+      <button class="nav-item" data-route="today"><span class="nav-ico">◎</span> Today</button>
+      <button class="nav-item" data-route="dashboard"><span class="nav-ico">▦</span> Dashboard</button>
+      <button class="nav-item" data-route="leads"><span class="nav-ico">☰</span> Leads</button>
+      <button class="nav-item" data-route="pipeline"><span class="nav-ico">▥</span> Pipeline</button>
+      <button class="nav-item" data-route="prompts"><span class="nav-ico">✦</span> AI Prompts</button>
+      <button class="nav-item" data-route="data"><span class="nav-ico">⤓</span> Data</button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <button class="btn btn-ghost btn-sm" id="themeToggle" title="Toggle light / dark">
+        <span class="theme-ico">◐</span> <span class="theme-label">Theme</span>
+      </button>
+      <p class="muted tiny">Local-first · saved in your browser</p>
+    </div>
+  </aside>
+
+  <!-- ============ Main ============ -->
+  <main class="main" id="main">
+    <div id="view" class="view"></div>
+  </main>
+
+  <!-- ============ Modal root ============ -->
+  <div id="modalRoot" class="modal-root" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-panel" role="dialog" aria-modal="true" id="modalPanel"></div>
+  </div>
+
+  <!-- ============ Toast ============ -->
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="assets/js/seed.js"></script>
+  <script src="assets/js/prompts.js"></script>
+  <script src="assets/js/store.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
