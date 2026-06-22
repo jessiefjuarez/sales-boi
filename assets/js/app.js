@@ -53,10 +53,13 @@
     dashboard: renderDashboard,
     discovery: renderDiscovery,
     leads: renderLeads,
+    contacts: renderContacts,
     pipeline: renderPipeline,
     prompts: renderPrompts,
     data: renderData,
   };
+
+  const contactFilters = { q: "", sort: "name" };
 
   // Cached queue list so the view doesn't flash empty while re-rendering.
   let discoveryCache = { items: null, loading: false, error: null };
@@ -584,6 +587,143 @@
       const s = $("#leadSearch");
       if (s) { s.focus(); try { s.setSelectionRange(selStart, selStart); } catch (e) {} }
     }, 160);
+  }
+
+  // =========================================================================
+  //  CONTACTS — all contacts across all leads in one table.
+  // =========================================================================
+  function renderContacts(view) {
+    const st = S.getState();
+    const leadById = Object.fromEntries(st.leads.map((l) => [l.id, l]));
+
+    view.appendChild(
+      el(`<div class="page-head">
+        <div>
+          <h1 class="page-title">Contacts</h1>
+          <p class="page-sub">${st.contacts.length} contact${st.contacts.length === 1 ? "" : "s"} across ${st.leads.length} agencies.</p>
+        </div>
+        <div class="head-actions"><button class="btn btn-primary" id="addContactTop">+ New contact</button></div>
+      </div>`)
+    );
+
+    const tb = el(`<div class="toolbar">
+      <div class="search"><input class="input" id="contactSearch" placeholder="Search name, role, email, agency…" value="${esc(contactFilters.q)}" /></div>
+      <select class="select" id="contactSort"></select>
+    </div>`);
+    const sb = $("#contactSort", tb);
+    [["name", "Sort: Name A–Z"], ["agency", "Sort: Agency A–Z"], ["role", "Sort: Role"]].forEach(([v, label]) =>
+      sb.appendChild(el(`<option value="${v}" ${contactFilters.sort === v ? "selected" : ""}>${label}</option>`))
+    );
+    view.appendChild(tb);
+
+    // Build rows: only contacts whose lead still exists.
+    let rows = st.contacts
+      .map((c) => ({ contact: c, lead: leadById[c.leadId] }))
+      .filter((r) => r.lead);
+
+    const q = contactFilters.q.toLowerCase().trim();
+    if (q) {
+      rows = rows.filter((r) => {
+        const c = r.contact, l = r.lead;
+        const blob = `${c.name} ${c.role} ${c.email} ${c.linkedin} ${c.instagram} ${l.name} ${l.niche}`.toLowerCase();
+        return blob.includes(q);
+      });
+    }
+
+    rows.sort((a, b) => {
+      if (contactFilters.sort === "agency") return a.lead.name.localeCompare(b.lead.name);
+      if (contactFilters.sort === "role") return (a.contact.role || "").localeCompare(b.contact.role || "");
+      return (a.contact.name || "").localeCompare(b.contact.name || "");
+    });
+
+    if (!rows.length) {
+      view.appendChild(
+        el(`<div class="card"><div class="empty">
+          <div class="em-ico">◉</div>
+          <h3>${st.contacts.length ? "No contacts match" : "No contacts yet"}</h3>
+          <p>${st.contacts.length
+            ? "Try clearing the search."
+            : "Open any lead and use <strong>+ Add contact</strong>, or click <strong>+ New contact</strong> above."}</p>
+        </div></div>`)
+      );
+    } else {
+      const wrap = el(`<div class="table-wrap"><table class="leads"><thead><tr>
+        <th>Name</th><th>Role</th><th>Agency</th><th>Email</th><th>Links</th>
+      </tr></thead><tbody></tbody></table></div>`);
+      const tbody = $("tbody", wrap);
+      rows.forEach(({ contact, lead }) => {
+        const links = [];
+        if (contact.linkedin) links.push(`<a href="${esc(contact.linkedin)}" target="_blank" rel="noopener" title="LinkedIn" onclick="event.stopPropagation()">in</a>`);
+        if (contact.instagram) links.push(`<a href="${esc(contact.instagram)}" target="_blank" rel="noopener" title="Instagram" onclick="event.stopPropagation()">ig</a>`);
+        const email = contact.email
+          ? `<a href="mailto:${esc(contact.email)}" onclick="event.stopPropagation()">${esc(contact.email)}</a>`
+          : '<span class="muted small">—</span>';
+        const tr = el(`<tr>
+          <td><div class="lead-name">${esc(contact.name || "—")}</div></td>
+          <td>${esc(contact.role || "—")}</td>
+          <td><div class="lead-name">${esc(lead.name)}</div><div class="lead-sub">${esc(lead.niche || "")}</div></td>
+          <td>${email}</td>
+          <td><div class="tags">${links.join("") || '<span class="muted small">—</span>'}</div></td>
+        </tr>`);
+        tr.addEventListener("click", () => openLead(lead.id));
+        tbody.appendChild(tr);
+      });
+      view.appendChild(wrap);
+    }
+
+    const search = $("#contactSearch", tb);
+    search.addEventListener("input", () => {
+      contactFilters.q = search.value;
+      clearTimeout(contactRerenderTimer);
+      contactRerenderTimer = setTimeout(() => {
+        render();
+        const s = $("#contactSearch");
+        if (s) { s.focus(); try { s.setSelectionRange(s.value.length, s.value.length); } catch (e) {} }
+      }, 160);
+    });
+    sb.addEventListener("change", () => { contactFilters.sort = sb.value; render(); });
+    $("#addContactTop").addEventListener("click", () => openNewContactPicker());
+  }
+
+  let contactRerenderTimer = null;
+
+  // Prompts the user to pick a lead, then opens it on the contacts tab of the
+  // lead detail. Lighter than building a separate "new contact" modal.
+  function openNewContactPicker() {
+    const st = S.getState();
+    if (!st.leads.length) return toast("Add a lead first");
+
+    const panel = el(`<div></div>`);
+    panel.appendChild(el(`<div class="modal-head">
+      <h2 class="modal-title">Pick the agency</h2>
+      <button class="x" id="px">✕</button>
+    </div>`));
+    panel.appendChild(el(`<div class="form-grid">
+      <div class="field full">
+        <label>Which agency is this contact for?</label>
+        <select class="select" id="pickLead" style="width:100%"></select>
+        <p class="muted small" style="margin-top:6px">You'll add the contact's details on the next screen.</p>
+      </div>
+    </div>`));
+    panel.appendChild(el(`<div class="modal-foot">
+      <button class="btn" id="pCancel">Cancel</button>
+      <button class="btn btn-primary" id="pGo">Continue</button>
+    </div>`));
+
+    const sel = $("#pickLead", panel);
+    st.leads
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .forEach((l) => sel.appendChild(el(`<option value="${l.id}">${esc(l.name)}</option>`)));
+
+    openModal(panel);
+    $("#px", panel).addEventListener("click", closeModal);
+    $("#pCancel", panel).addEventListener("click", closeModal);
+    $("#pGo", panel).addEventListener("click", () => {
+      const leadId = sel.value;
+      closeModal();
+      openLead(leadId);
+    });
   }
 
   // =========================================================================

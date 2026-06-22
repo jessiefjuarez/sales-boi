@@ -8,12 +8,19 @@ directory = "./"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
-[[kv_namespaces]]
-binding = "QUEUE"
-id = "REPLACE_WITH_KV_ID_FROM_WRANGLER"
-
-[triggers]
-crons = ["0 13 * * *"]
+# --- AI Discovery (optional) ---------------------------------------------
+# Uncomment the next 3 lines AND the [triggers] block below after you've run:
+#   npx wrangler kv namespace create QUEUE
+# Replace the id with the printed value. Without these, /api/discover and
+# /api/queue endpoints will return 503; everything else (static site, /api/score-url)
+# still works.
+#
+# [[kv_namespaces]]
+# binding = "QUEUE"
+# id = "REPLACE_WITH_KV_ID_FROM_WRANGLER"
+#
+# [triggers]
+# crons = ["0 13 * * *"]
 
 [vars]
 DISCOVER_CITIES = "Austin,Los Angeles,Brooklyn,Miami,Denver,Chicago,Portland,Seattle,Nashville,Remote"

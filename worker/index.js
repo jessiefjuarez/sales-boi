@@ -28,13 +28,18 @@ async function handleApi(request, env, ctx) {
     return json({ lead });
   }
 
+  const requireQueue = () =>
+    errorJson("Queue not configured. Create a KV namespace (see wrangler.toml) and redeploy.", 503);
+
   if (path === "/api/discover" && method === "POST") {
+    if (!env.QUEUE) return requireQueue();
     const body = await request.json().catch(() => ({}));
     const added = await runDiscovery(env, { limit: body.limit || 25 });
     return json({ added });
   }
 
   if (path === "/api/queue" && method === "GET") {
+    if (!env.QUEUE) return requireQueue();
     const status = url.searchParams.get("status") || "pending";
     const items = await listQueue(env, { status });
     return json({ items });
@@ -42,6 +47,7 @@ async function handleApi(request, env, ctx) {
 
   const m = path.match(/^\/api\/queue\/([^/]+)\/(confirm|reject|snooze)$/);
   if (m && method === "POST") {
+    if (!env.QUEUE) return requireQueue();
     const [, id, action] = m;
     const body = await request.json().catch(() => ({}));
     const result = await actOnCandidate(env, id, action, body);
@@ -66,6 +72,10 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    if (!env.QUEUE) {
+      console.warn("cron skipped — KV namespace not configured");
+      return;
+    }
     ctx.waitUntil(
       runDiscovery(env, { limit: 25 }).catch((e) => console.error("cron discovery failed", e))
     );
