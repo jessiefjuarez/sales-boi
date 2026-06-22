@@ -1,0 +1,9 @@
+/worker/
+/docs/
+/wrangler.toml
+/.assetsignore
+/.gitignore
+/package.json
+/package-lock.json
+/node_modules/
+/README.md

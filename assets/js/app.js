@@ -51,11 +51,15 @@
   const ROUTES = {
     today: renderToday,
     dashboard: renderDashboard,
+    discovery: renderDiscovery,
     leads: renderLeads,
     pipeline: renderPipeline,
     prompts: renderPrompts,
     data: renderData,
   };
+
+  // Cached queue list so the view doesn't flash empty while re-rendering.
+  let discoveryCache = { items: null, loading: false, error: null };
 
   function go(r) {
     route = r;
@@ -232,7 +236,10 @@
     view.appendChild(
       el(`<div class="page-head">
         <div><h1 class="page-title">Leads</h1><p class="page-sub">${st.leads.length} agencies tracked.</p></div>
-        <div class="head-actions"><button class="btn btn-primary" id="addLeadTop">+ New lead</button></div>
+        <div class="head-actions">
+          <button class="btn" id="addByUrlTop">+ From URL</button>
+          <button class="btn btn-primary" id="addLeadTop">+ New lead</button>
+        </div>
       </div>`)
     );
 
@@ -306,6 +313,250 @@
     sf.addEventListener("change", () => { leadFilters.status = sf.value; render(); });
     sb.addEventListener("change", () => { leadFilters.sort = sb.value; render(); });
     $("#addLeadTop").addEventListener("click", () => openLeadForm());
+    $("#addByUrlTop").addEventListener("click", () => openAddByUrlModal());
+  }
+
+  // =========================================================================
+  //  ADD BY URL — paste a website, Claude scores it, instant lead.
+  // =========================================================================
+  function openAddByUrlModal() {
+    const panel = el(`<div></div>`);
+    panel.appendChild(el(`<div class="modal-head">
+      <h2 class="modal-title">Add lead from URL</h2>
+      <button class="x" id="ux">✕</button>
+    </div>`));
+    panel.appendChild(el(`<div class="form-grid">
+      <div class="field full">
+        <label>Agency website</label>
+        <input class="input" id="urlInput" placeholder="https://northloop.studio" autofocus />
+        <p class="muted small" style="margin-top:6px">Claude reads the homepage and pre-fills a scored lead.</p>
+      </div>
+      <div class="field full" id="urlStatus" hidden><div class="muted small"></div></div>
+    </div>`));
+    panel.appendChild(el(`<div class="modal-foot">
+      <button class="btn" id="uCancel">Cancel</button>
+      <button class="btn btn-primary" id="uScore">Score & add</button>
+    </div>`));
+
+    openModal(panel);
+    $("#ux", panel).addEventListener("click", closeModal);
+    $("#uCancel", panel).addEventListener("click", closeModal);
+
+    const input = $("#urlInput", panel);
+    const statusBox = $("#urlStatus", panel);
+    const submitBtn = $("#uScore", panel);
+
+    async function submit() {
+      const url = input.value.trim();
+      if (!url) return toast("Paste a URL first");
+      submitBtn.disabled = true;
+      statusBox.hidden = false;
+      statusBox.querySelector("div").textContent = "Reading homepage and scoring…";
+      try {
+        const { lead } = await window.API.scoreUrl(url);
+        const created = S.addLead(lead);
+        if (lead.draftMessage) {
+          S.addActivity(created.id, {
+            type: "draft",
+            channel: "Email",
+            direction: "out",
+            summary: lead.draftMessage,
+          });
+        }
+        toast("Lead added");
+        closeModal();
+        openLead(created.id);
+      } catch (e) {
+        statusBox.querySelector("div").textContent = "Failed: " + e.message;
+        submitBtn.disabled = false;
+      }
+    }
+    submitBtn.addEventListener("click", submit);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+  }
+
+  // =========================================================================
+  //  DISCOVERY — AI-sourced candidates awaiting review.
+  // =========================================================================
+  function renderDiscovery(view) {
+    view.appendChild(
+      el(`<div class="page-head">
+        <div>
+          <h1 class="page-title">Discovery</h1>
+          <p class="page-sub">AI-sourced agencies for review. Confirm to push into Leads.</p>
+        </div>
+        <div class="head-actions">
+          <button class="btn" id="addByUrlTop">+ From URL</button>
+          <button class="btn btn-primary" id="runDisc">Run discovery now</button>
+        </div>
+      </div>`)
+    );
+
+    const tabs = el(`<div class="chip-row" style="margin-bottom:16px">
+      <button class="fchip ${discoveryCache.status !== "snoozed" ? "active" : ""}" data-tab="pending">Pending</button>
+      <button class="fchip ${discoveryCache.status === "snoozed" ? "active" : ""}" data-tab="snoozed">Snoozed</button>
+    </div>`);
+    view.appendChild(tabs);
+
+    const listWrap = el(`<div id="discList"></div>`);
+    view.appendChild(listWrap);
+
+    function paintList() {
+      listWrap.innerHTML = "";
+      if (discoveryCache.loading) {
+        listWrap.appendChild(el(`<div class="card"><div class="empty"><div class="em-ico">…</div><h3>Loading</h3><p>Fetching candidates from the queue.</p></div></div>`));
+        return;
+      }
+      if (discoveryCache.error) {
+        listWrap.appendChild(el(`<div class="card pad"><h3 class="section-title">Couldn't load queue</h3><p class="muted small">${esc(discoveryCache.error)}</p><p class="muted small">Check that the Worker is deployed and ANTHROPIC_API_KEY is set.</p></div>`));
+        return;
+      }
+      const items = discoveryCache.items || [];
+      if (!items.length) {
+        listWrap.appendChild(el(`<div class="card"><div class="empty"><div class="em-ico">✺</div><h3>No candidates yet</h3><p>Click <strong>Run discovery now</strong> to find a fresh batch, or paste a URL with <strong>+ From URL</strong>.</p></div></div>`));
+        return;
+      }
+      const grid = el(`<div class="stack" style="gap:14px"></div>`);
+      items.forEach((rec) => grid.appendChild(makeDiscoveryCard(rec)));
+      listWrap.appendChild(grid);
+    }
+
+    async function loadQueue(status) {
+      discoveryCache.loading = true;
+      discoveryCache.error = null;
+      discoveryCache.status = status;
+      paintList();
+      try {
+        const { items } = await window.API.listQueue(status);
+        discoveryCache.items = items;
+      } catch (e) {
+        discoveryCache.error = e.message;
+        discoveryCache.items = [];
+      }
+      discoveryCache.loading = false;
+      paintList();
+    }
+
+    $$("button[data-tab]", tabs).forEach((b) =>
+      b.addEventListener("click", () => {
+        $$(".fchip", tabs).forEach((x) => x.classList.toggle("active", x === b));
+        loadQueue(b.dataset.tab);
+      })
+    );
+
+    $("#runDisc").addEventListener("click", async () => {
+      const btn = $("#runDisc");
+      btn.disabled = true;
+      btn.textContent = "Searching…";
+      try {
+        const { added } = await window.API.runDiscovery(15);
+        toast(added && added.length ? `Added ${added.length} new candidate${added.length === 1 ? "" : "s"}` : "No new candidates this run");
+        await loadQueue(discoveryCache.status || "pending");
+      } catch (e) {
+        toast("Discovery failed: " + e.message);
+      }
+      btn.disabled = false;
+      btn.textContent = "Run discovery now";
+    });
+
+    $("#addByUrlTop").addEventListener("click", () => openAddByUrlModal());
+
+    loadQueue(discoveryCache.status || "pending");
+  }
+
+  function makeDiscoveryCard(rec) {
+    const lead = rec.lead;
+    const score = S.scoreLead(lead);
+    const band = S.scoreBand(score);
+    const host = (() => {
+      try { return new URL(lead.website).hostname.replace(/^www\./, ""); } catch { return lead.website; }
+    })();
+
+    const card = el(`<div class="card pad">
+      <div class="row-between" style="gap:16px;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div class="lead-name" style="font-size:18px">${esc(lead.name)}</div>
+          <div class="lead-sub"><a href="${esc(lead.website)}" target="_blank" rel="noopener">${esc(host)} ↗</a> · ${esc(lead.niche || "—")}${lead.location ? " · " + esc(lead.location) : ""}${lead.size ? " · " + esc(lead.size) : ""}</div>
+          ${lead.tags && lead.tags.length ? `<div class="tags" style="margin-top:8px">${lead.tags.slice(0, 5).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
+        </div>
+        <div style="text-align:right;flex:0 0 auto">
+          <span class="score ${band}"><span class="dot"></span>${score}</span>
+        </div>
+      </div>
+
+      ${lead.rationale ? `<p class="muted small" style="margin-top:12px">${esc(lead.rationale)}</p>` : ""}
+
+      <details style="margin-top:12px">
+        <summary class="muted small" style="cursor:pointer">Draft outreach</summary>
+        <div class="card pad" style="margin-top:8px;background:var(--soft, transparent)">
+          <pre style="white-space:pre-wrap;font-family:inherit;margin:0;font-size:14px">${esc(lead.draftMessage || "—")}</pre>
+          ${lead.draftMessage ? `<div style="margin-top:8px"><button class="btn btn-sm" data-act="copy">Copy draft</button></div>` : ""}
+        </div>
+      </details>
+
+      <div class="row-between" style="margin-top:14px;gap:8px">
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" data-act="snooze">Snooze 14d</button>
+          <button class="btn btn-sm" data-act="reject">Reject</button>
+        </div>
+        <button class="btn btn-primary btn-sm" data-act="confirm">Confirm → Leads</button>
+      </div>
+    </div>`);
+
+    function actionBtn(name) { return $(`button[data-act="${name}"]`, card); }
+
+    const copyBtn = actionBtn("copy");
+    if (copyBtn) copyBtn.addEventListener("click", () => copyText(lead.draftMessage, "Draft copied"));
+
+    actionBtn("snooze").addEventListener("click", async () => {
+      try {
+        await window.API.snooze(rec.id, 14);
+        discoveryCache.items = (discoveryCache.items || []).filter((x) => x.id !== rec.id);
+        toast("Snoozed 14 days");
+        render();
+      } catch (e) { toast("Snooze failed: " + e.message); }
+    });
+
+    actionBtn("reject").addEventListener("click", async () => {
+      try {
+        await window.API.reject(rec.id);
+        discoveryCache.items = (discoveryCache.items || []).filter((x) => x.id !== rec.id);
+        toast("Rejected");
+        render();
+      } catch (e) { toast("Reject failed: " + e.message); }
+    });
+
+    actionBtn("confirm").addEventListener("click", async () => {
+      try {
+        await window.API.confirm(rec.id);
+        const created = S.addLead({
+          name: lead.name,
+          website: lead.website,
+          niche: lead.niche,
+          location: lead.location,
+          size: lead.size,
+          services: lead.services || [],
+          tags: lead.tags || [],
+          notes: lead.notes || "",
+          source: lead.source || "AI discovery",
+          status: lead.status || "Ready to contact",
+          signals: lead.signals || {},
+        });
+        if (lead.draftMessage) {
+          S.addActivity(created.id, {
+            type: "draft",
+            channel: "Email",
+            direction: "out",
+            summary: lead.draftMessage,
+          });
+        }
+        discoveryCache.items = (discoveryCache.items || []).filter((x) => x.id !== rec.id);
+        toast("Added to Leads");
+        render();
+      } catch (e) { toast("Confirm failed: " + e.message); }
+    });
+
+    return card;
   }
 
   function lead_priority_star(l) {
