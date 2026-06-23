@@ -350,6 +350,7 @@ table.leads { width: 100%; border-collapse: collapse; min-width: 760px; }
 
 /* ---------- Modal ---------- */
 .modal-root { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px; }
+.modal-root[hidden] { display: none; }
 .modal-backdrop { position: absolute; inset: 0; background: rgba(20,18,14,0.42); backdrop-filter: blur(2px); }
 .modal-panel {
   position: relative; background: var(--surface); border: 1px solid var(--line);
