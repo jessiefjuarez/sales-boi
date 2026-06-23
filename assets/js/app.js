@@ -602,11 +602,29 @@
     const st = S.getState();
     const leadById = Object.fromEntries(st.leads.map((l) => [l.id, l]));
 
+    // A lead qualifies its contacts for this page if a meeting was booked
+    // (status reached Call booked or further along the funnel) OR if the
+    // lead has at least one opportunity logged.
+    const MEETING_STATUSES = new Set(["Call booked", "Proposal sent", "Won"]);
+    const leadOppsById = {};
+    st.leads.forEach((l) => (leadOppsById[l.id] = S.opportunitiesFor(l.id)));
+    const leadQualifies = (l) =>
+      MEETING_STATUSES.has(l.status) || (leadOppsById[l.id] || []).length > 0;
+    const hasPastProject = (l) =>
+      (leadOppsById[l.id] || []).some((o) => o.stage === "Won");
+
+    // Total contacts saved overall vs. the filtered subset shown on this page.
+    const qualifyingContactCount = st.contacts.filter((c) => {
+      const l = leadById[c.leadId];
+      return l && leadQualifies(l);
+    }).length;
+    const hiddenCount = st.contacts.length - qualifyingContactCount;
+
     view.appendChild(
       el(`<div class="page-head">
         <div>
           <h1 class="page-title">Contacts</h1>
-          <p class="page-sub">${st.contacts.length} contact${st.contacts.length === 1 ? "" : "s"} across ${st.leads.length} agencies.</p>
+          <p class="page-sub">${qualifyingContactCount} contact${qualifyingContactCount === 1 ? "" : "s"} from booked meetings or active projects${hiddenCount > 0 ? ` · <span class="muted">${hiddenCount} hidden until their lead progresses</span>` : ""}.</p>
         </div>
         <div class="head-actions"><button class="btn btn-primary" id="addContactTop">+ New contact</button></div>
       </div>`)
@@ -622,10 +640,10 @@
     );
     view.appendChild(tb);
 
-    // Build rows: only contacts whose lead still exists.
+    // Build rows: only contacts whose lead still exists and qualifies.
     let rows = st.contacts
       .map((c) => ({ contact: c, lead: leadById[c.leadId] }))
-      .filter((r) => r.lead);
+      .filter((r) => r.lead && leadQualifies(r.lead));
 
     const q = contactFilters.q.toLowerCase().trim();
     if (q) {
@@ -643,18 +661,26 @@
     });
 
     if (!rows.length) {
+      const emptyTitle = q
+        ? "No contacts match"
+        : qualifyingContactCount === 0 && st.contacts.length > 0
+          ? "No qualifying contacts yet"
+          : "No contacts yet";
+      const emptyBody = q
+        ? "Try clearing the search."
+        : qualifyingContactCount === 0 && st.contacts.length > 0
+          ? `${st.contacts.length} contact${st.contacts.length === 1 ? "" : "s"} are saved on leads that haven't booked a meeting or opened a project yet. They'll appear here once the lead reaches <strong>Call booked</strong> or gets an opportunity.`
+          : "Open any lead and use <strong>+ Add contact</strong>, or click <strong>+ New contact</strong> above.";
       view.appendChild(
         el(`<div class="card"><div class="empty">
           <div class="em-ico">◉</div>
-          <h3>${st.contacts.length ? "No contacts match" : "No contacts yet"}</h3>
-          <p>${st.contacts.length
-            ? "Try clearing the search."
-            : "Open any lead and use <strong>+ Add contact</strong>, or click <strong>+ New contact</strong> above."}</p>
+          <h3>${emptyTitle}</h3>
+          <p>${emptyBody}</p>
         </div></div>`)
       );
     } else {
       const wrap = el(`<div class="table-wrap"><table class="leads"><thead><tr>
-        <th>Name</th><th>Role</th><th>Agency</th><th>Email</th><th>Links</th>
+        <th>Name</th><th>Role</th><th>Agency</th><th>Past project</th><th>Email</th><th>Links</th>
       </tr></thead><tbody></tbody></table></div>`);
       const tbody = $("tbody", wrap);
       rows.forEach(({ contact, lead }) => {
@@ -664,10 +690,14 @@
         const email = contact.email
           ? `<a href="mailto:${esc(contact.email)}" onclick="event.stopPropagation()">${esc(contact.email)}</a>`
           : '<span class="muted small">—</span>';
+        const pastProject = hasPastProject(lead)
+          ? '<span class="pill s-won" title="At least one Won opportunity">✓ Yes</span>'
+          : '<span class="muted small">—</span>';
         const tr = el(`<tr>
           <td><div class="lead-name">${esc(contact.name || "—")}</div></td>
           <td>${esc(contact.role || "—")}</td>
           <td><div class="lead-name">${esc(lead.name)}</div><div class="lead-sub">${esc(lead.niche || "")}</div></td>
+          <td>${pastProject}</td>
           <td>${email}</td>
           <td><div class="tags">${links.join("") || '<span class="muted small">—</span>'}</div></td>
         </tr>`);
