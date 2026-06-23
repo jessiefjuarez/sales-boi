@@ -62,6 +62,8 @@
   const OPP_STAGES = ["Prospect", "Replied", "Qualified", "Proposal sent", "Won", "Lost"];
 
   const TAG_SUGGESTIONS = [
+    "Agency",
+    "Business",
     "e-commerce",
     "performance agency",
     "social agency",
