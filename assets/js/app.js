@@ -610,8 +610,15 @@
     st.leads.forEach((l) => (leadOppsById[l.id] = S.opportunitiesFor(l.id)));
     const leadQualifies = (l) =>
       MEETING_STATUSES.has(l.status) || (leadOppsById[l.id] || []).length > 0;
-    const hasPastProject = (l) =>
-      (leadOppsById[l.id] || []).some((o) => o.stage === "Won");
+    const computedPastProject = (l) =>
+      (leadOppsById[l.id] || []).some((o) => o.stage === "Won") ? "yes" : "no";
+    const pastProjectValue = (l) =>
+      l.pastProject || computedPastProject(l);
+    const PAST_PROJECT_OPTIONS = [
+      ["yes", "Yes"],
+      ["no", "No"],
+      ["overMonth", "Over a month"],
+    ];
 
     // Total contacts saved overall vs. the filtered subset shown on this page.
     const qualifyingContactCount = st.contacts.filter((c) => {
@@ -690,17 +697,23 @@
         const email = contact.email
           ? `<a href="mailto:${esc(contact.email)}" onclick="event.stopPropagation()">${esc(contact.email)}</a>`
           : '<span class="muted small">—</span>';
-        const pastProject = hasPastProject(lead)
-          ? '<span class="pill s-won" title="At least one Won opportunity">✓ Yes</span>'
-          : '<span class="muted small">—</span>';
+        const currentPP = pastProjectValue(lead);
+        const ppSelect = el(`<select class="select select-sm pp-select" data-lead="${lead.id}" title="${lead.pastProject ? "Manually set" : "Auto from opportunities — pick to override"}">
+          ${PAST_PROJECT_OPTIONS.map(([v, label]) => `<option value="${v}" ${v === currentPP ? "selected" : ""}>${label}</option>`).join("")}
+        </select>`);
+        ppSelect.addEventListener("click", (e) => e.stopPropagation());
+        ppSelect.addEventListener("change", (e) => {
+          S.updateLead(lead.id, { pastProject: e.target.value });
+        });
         const tr = el(`<tr>
           <td><div class="lead-name">${esc(contact.name || "—")}</div></td>
           <td>${esc(contact.role || "—")}</td>
           <td><div class="lead-name">${esc(lead.name)}</div><div class="lead-sub">${esc(lead.niche || "")}</div></td>
-          <td>${pastProject}</td>
+          <td class="pp-cell"></td>
           <td>${email}</td>
           <td><div class="tags">${links.join("") || '<span class="muted small">—</span>'}</div></td>
         </tr>`);
+        $(".pp-cell", tr).appendChild(ppSelect);
         tr.addEventListener("click", () => openLead(lead.id));
         tbody.appendChild(tr);
       });
