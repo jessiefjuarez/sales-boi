@@ -288,7 +288,7 @@
       view.appendChild(el(`<div class="card"><div class="empty"><div class="em-ico">☰</div><h3>No leads match</h3><p>Try clearing filters, or add a new agency.</p></div></div>`));
     } else {
       const wrap = el(`<div class="table-wrap"><table class="leads"><thead><tr>
-        <th>Agency</th><th>Niche</th><th>Fit</th><th>Status</th><th>Tags</th><th>Follow-up</th>
+        <th>Agency</th><th>Niche</th><th>Fit</th><th>Status</th><th>Tags</th><th>Opportunities</th><th>Follow-up</th>
       </tr></thead><tbody></tbody></table></div>`);
       const tbody = $("tbody", wrap);
       rows.forEach((l) => {
@@ -296,12 +296,18 @@
         const band = S.scoreBand(score);
         const stage = S.stageOf(l);
         const due = l.followUpDate ? `<span class="due ${S.isOverdue(l.followUpDate) ? "over" : S.isToday(l.followUpDate) ? "today" : ""}">${relDay(l.followUpDate)}</span>` : '<span class="muted small">—</span>';
+        const openOpps = S.opportunitiesFor(l.id).filter((o) => o.stage !== "Lost");
+        const oppVal = openOpps.reduce((s, o) => s + (Number(o.value) || 0), 0);
+        const oppCell = openOpps.length
+          ? `<div>${openOpps.length} open</div>${oppVal ? `<div class="lead-sub">${money(oppVal)}</div>` : ""}`
+          : '<span class="muted small">—</span>';
         const tr = el(`<tr>
           <td><div class="lead-name">${lead_priority_star(l)}${esc(l.name)}</div><div class="lead-sub">${esc(l.location || "")}</div></td>
           <td>${esc(l.niche || "—")}<div class="lead-sub">${esc(l.size || "")}</div></td>
           <td><span class="score ${band}"><span class="dot"></span>${score}</span></td>
           <td><span class="pill ${stageClass(stage)}">${esc(l.status)}</span></td>
           <td><div class="tags">${(l.tags || []).slice(0, 3).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div></td>
+          <td>${oppCell}</td>
           <td>${due}</td>
         </tr>`);
         tr.addEventListener("click", () => openLead(l.id));
