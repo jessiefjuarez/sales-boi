@@ -59,7 +59,12 @@ async function handleApi(request, env, ctx) {
 
 export default {
   async fetch(request, env, ctx) {
+    // Sales Boi moved to rockydogstudios.com/sales (server-saved data, same
+    // login as the admin). Every page request goes there now.
     const url = new URL(request.url);
+    if (!url.pathname.startsWith("/api/")) {
+      return Response.redirect("https://rockydogstudios.com/sales", 301);
+    }
     if (url.pathname.startsWith("/api/")) {
       try {
         return await handleApi(request, env, ctx);

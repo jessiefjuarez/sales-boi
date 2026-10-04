@@ -7,6 +7,8 @@ compatibility_flags = ["nodejs_compat"]
 directory = "./"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# The Worker answers first so it can redirect pages to rockydogstudios.com/sales.
+run_worker_first = true
 
 # --- AI Discovery (optional) ---------------------------------------------
 # Uncomment the next 3 lines AND the [triggers] block below after you've run:
