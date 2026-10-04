@@ -9,9 +9,9 @@
   // The editor's fixed positioning details. Edit these once and every
   // generated prompt reflects them. (Surfaced in Settings later if wanted.)
   const ME = {
-    role: "remote video editor who supports agencies with short-form ads and longer brand/promo videos",
-    basePrice: "around $300 for a simple 30–60 second edit when footage and direction are provided",
-    edits: "short-form paid ad edits, UGC-style cuts, and longer brand/promo videos",
+    role: "Los Angeles video production and post studio (Rocky Dog Studios, rockydogstudios.com) that shoots and edits commercials, brand films, and social content for brands and agencies",
+    basePrice: "editing from about $250 for a 15–30 second cut, half-day shoots from $950, and a half-day shoot plus a 30–60 second edit from about $1,250",
+    edits: "commercials, brand films, short-form social and paid ad edits, interviews, color, sound design, and motion graphics",
   };
 
   const TEMPLATES = [
@@ -43,9 +43,9 @@
       needsLead: true,
       hint: "Your main first-touch email.",
       body:
-        "Write a cold email under 120 words to this agency. Mention one specific thing about their work, briefly explain that I am a " +
+        "Write a cold email under 120 words to this company (a brand or an agency). Mention one specific thing about their work, briefly explain that I am a " +
         ME.role +
-        ", and make a soft offer to help with overflow editing. Keep it concise and natural — no buzzwords, no hard sell.\n\n" +
+        ", and make a soft offer: a free 15-second recut of footage they already have. Keep it concise and natural — no buzzwords, no hard sell.\n\n" +
         "Agency: {{name}}\nWebsite: {{website}}\nNiche: {{niche}}\nServices: {{services}}\nContact: {{contactName}} ({{contactRole}})\nSomething specific I noticed: {{notes}}",
     },
     {

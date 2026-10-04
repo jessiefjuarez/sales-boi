@@ -16,6 +16,11 @@
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
     );
   }
+  // Imported emails carry the provider's check result; only "valid" is verified.
+  function emailFlag(c) {
+    if (!c.emailStatus || c.emailStatus === "valid") return "";
+    return ` <span class="tag" title="Email check: ${esc(c.emailStatus)}">unverified</span>`;
+  }
   function el(html) {
     const t = document.createElement("template");
     t.innerHTML = html.trim();
@@ -121,6 +126,15 @@
         </div>
       </div>`)
     );
+
+    if (S.hasSampleData()) {
+      const banner = el(`<div class="card pad row-between" style="margin-bottom:16px;gap:12px;flex-wrap:wrap">
+        <span>These are <strong>sample leads</strong>, not real prospects. Clear them before importing your list.</span>
+        <button class="btn btn-primary btn-sm" id="clearSample">Remove sample leads</button>
+      </div>`);
+      $("#clearSample", banner).addEventListener("click", () => { S.removeSampleData(); toast("Sample leads removed"); });
+      view.appendChild(banner);
+    }
 
     const grid = el(`<div class="today-grid"></div>`);
 
@@ -695,7 +709,7 @@
         if (contact.linkedin) links.push(`<a href="${esc(contact.linkedin)}" target="_blank" rel="noopener" title="LinkedIn" onclick="event.stopPropagation()">in</a>`);
         if (contact.instagram) links.push(`<a href="${esc(contact.instagram)}" target="_blank" rel="noopener" title="Instagram" onclick="event.stopPropagation()">ig</a>`);
         const email = contact.email
-          ? `<a href="mailto:${esc(contact.email)}" onclick="event.stopPropagation()">${esc(contact.email)}</a>`
+          ? `<a href="mailto:${esc(contact.email)}" onclick="event.stopPropagation()">${esc(contact.email)}</a>${emailFlag(contact)}`
           : '<span class="muted small">—</span>';
         const currentPP = pastProjectValue(lead);
         const ppSelect = el(`<select class="select select-sm pp-select" data-lead="${lead.id}" title="${lead.pastProject ? "Manually set" : "Auto from opportunities — pick to override"}">
@@ -933,7 +947,7 @@
 
     const csv = el(`<div class="card pad">
       <h2 class="section-title">CSV (leads)</h2>
-      <p class="muted small" style="margin-top:4px">Round-trip with spreadsheets or prospecting tools. Columns: name, website, niche, tags, status, contactName, contactEmail…</p>
+      <p class="muted small" style="margin-top:4px">Imports exports from Vibe Prospecting, Apollo, or a spreadsheet as-is. People at the same company are grouped into one lead, duplicates are skipped, and first emails are scheduled across weekdays.</p>
       <div class="inline" style="margin-top:14px">
         <button class="btn btn-primary" id="expCSV">⤓ Export leads CSV</button>
         <button class="btn" id="impCSVBtn">⤒ Import leads CSV</button>
@@ -948,6 +962,7 @@
       <h2 class="section-title">Sample & reset</h2>
       <p class="muted small" style="margin-top:4px">${st.leads.length} leads currently stored.</p>
       <div class="inline" style="margin-top:14px">
+        ${S.hasSampleData() ? `<button class="btn btn-primary" id="removeSample">Remove sample leads</button>` : ""}
         <button class="btn" id="loadSample">Reload sample data</button>
         <button class="btn btn-danger" id="clearAll">Clear everything</button>
       </div>
@@ -969,16 +984,52 @@
     }));
     $("#expCSV").addEventListener("click", () => download("agencyflow-leads.csv", S.exportLeadsCSV(), "text/csv"));
     $("#impCSVBtn").addEventListener("click", () => $("#impCSV").click());
-    $("#impCSV").addEventListener("change", (e) => readFile(e, (text) => {
-      const n = S.importLeadsCSV(text);
-      toast(`Imported ${n} lead${n === 1 ? "" : "s"}`);
-      go("leads");
-    }));
+    $("#impCSV").addEventListener("change", (e) => readFile(e, openImportModal));
+    if ($("#removeSample")) $("#removeSample").addEventListener("click", () => { S.removeSampleData(); toast("Sample leads removed"); });
     $("#loadSample").addEventListener("click", () => {
       if (confirm("Replace current data with the sample set?")) { S.reset(); toast("Sample data loaded"); go("dashboard"); }
     });
     $("#clearAll").addEventListener("click", () => {
       if (confirm("Delete ALL data? This cannot be undone.")) { S.clearAll(); toast("All data cleared"); go("leads"); }
+    });
+  }
+
+  function openImportModal(text) {
+    const panel = el(`<div></div>`);
+    panel.appendChild(el(`<div class="modal-head"><h2 class="modal-title">Import contacts</h2><button class="x" id="ix">✕</button></div>`));
+    const form = el(`<div class="form-grid">
+      <div class="field"><label>Tag these leads as</label><select class="select" id="iTag" style="width:100%">
+        <option value="Business">Business (brand)</option><option value="Agency">Agency</option><option value="">No tag</option>
+      </select></div>
+      <div class="field"><label>First emails per weekday</label><input class="input" id="iPerDay" type="number" min="1" max="100" value="20" /></div>
+      <div class="field full"><label>Source label</label><input class="input" id="iSource" value="Vibe Prospecting ${S.todayISO()}" /></div>
+    </div>`);
+    panel.appendChild(form);
+    panel.appendChild(el(`<div class="modal-foot"><button class="btn" id="iCancel">Cancel</button><button class="btn btn-primary" id="iGo">Import</button></div>`));
+    openModal(panel);
+
+    $("#ix", panel).addEventListener("click", closeModal);
+    $("#iCancel", panel).addEventListener("click", closeModal);
+    $("#iGo", panel).addEventListener("click", () => {
+      const r = S.importLeadsCSV(text, {
+        tag: $("#iTag", panel).value,
+        perDay: $("#iPerDay", panel).value,
+        source: $("#iSource", panel).value.trim(),
+      });
+      const lines = [
+        `${r.leadsAdded} new lead${r.leadsAdded === 1 ? "" : "s"}, ${r.contactsAdded} contact${r.contactsAdded === 1 ? "" : "s"} added.`,
+        r.leadsMerged ? `${r.leadsMerged} matched ${r.leadsMerged === 1 ? "a lead" : "leads"} you already had (contacts merged in).` : "",
+        r.duplicateContacts ? `${r.duplicateContacts} duplicate contact${r.duplicateContacts === 1 ? "" : "s"} skipped.` : "",
+        r.skipped ? `${r.skipped} row${r.skipped === 1 ? "" : "s"} had no company or website and were skipped.` : "",
+        r.firstDay ? `First emails scheduled ${fmtDate(r.firstDay)} – ${fmtDate(r.lastDay)}, weekdays only.` : "",
+      ].filter(Boolean);
+      const done = el(`<div></div>`);
+      done.appendChild(el(`<div class="modal-head"><h2 class="modal-title">Import complete</h2><button class="x" id="dx">✕</button></div>`));
+      done.appendChild(el(`<div class="stack" style="gap:6px">${lines.map((l) => `<p>${esc(l)}</p>`).join("")}</div>`));
+      done.appendChild(el(`<div class="modal-foot"><button class="btn btn-primary" id="dGo">Go to Today</button></div>`));
+      openModal(done);
+      $("#dx", done).addEventListener("click", closeModal);
+      $("#dGo", done).addEventListener("click", () => { closeModal(); go("today"); });
     });
   }
 
@@ -1065,7 +1116,7 @@
       const card = el(`<div class="contact-card">
         <div class="row-between"><div class="cc-name">${esc(c.name || "Unnamed")} ${c.role ? `<span class="muted small">· ${esc(c.role)}</span>` : ""}</div>
         <button class="x" data-del="${c.id}" title="Remove">✕</button></div>
-        <div class="muted small">${c.email ? esc(c.email) + " · " : ""}${c.linkedin ? `<a href="${esc(c.linkedin)}" target="_blank" rel="noopener">LinkedIn</a>` : ""}${c.instagram ? " · " + esc(c.instagram) : ""}</div>
+        <div class="muted small">${c.email ? esc(c.email) + emailFlag(c) + " · " : ""}${c.linkedin ? `<a href="${esc(c.linkedin)}" target="_blank" rel="noopener">LinkedIn</a>` : ""}${c.instagram ? " · " + esc(c.instagram) : ""}</div>
       </div>`);
       $("[data-del]", card).addEventListener("click", () => { S.deleteContact(c.id); });
       cl.appendChild(card);

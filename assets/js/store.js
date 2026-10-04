@@ -116,8 +116,9 @@
     } catch (e) {
       console.warn("Could not parse saved data, starting fresh.", e);
     }
-    // First run → load seed data.
-    seed();
+    // First run → start empty. Sample data is opt-in from the Data page.
+    state = emptyState();
+    persist();
   }
 
   function seed() {
@@ -163,7 +164,7 @@
   }
 
   function todayISO() {
-    return new Date().toISOString().slice(0, 10);
+    return localISO(new Date());
   }
 
   // -- Scoring --------------------------------------------------------------
@@ -342,7 +343,7 @@
     const t = todayISO();
     const end = new Date();
     end.setDate(end.getDate() + n);
-    const endISO = end.toISOString().slice(0, 10);
+    const endISO = localISO(end);
     return iso >= t && iso <= endISO;
   }
   function monthKey(iso) {
@@ -492,31 +493,157 @@
       });
   }
 
-  function importLeadsCSV(text) {
-    const records = parseCSV(text);
-    let added = 0;
-    records.forEach((rec) => {
-      const lead = addLeadSilent({
-        name: rec.name || rec.Name || rec.agency || "Untitled agency",
-        website: rec.website || rec.Website || "",
-        niche: rec.niche || rec.Niche || "",
-        location: rec.location || rec.Location || "",
-        size: rec.size || rec.Size || "",
-        services: splitList(rec.services || rec.Services),
-        tags: splitList(rec.tags || rec.Tags),
-        status: STATUSES.indexOf(rec.status) >= 0 ? rec.status : "New",
-        source: rec.source || rec.Source || "CSV import",
-        notes: rec.notes || rec.Notes || "",
-      });
-      const cName = rec.contactName || rec.contact || rec.Contact;
-      const cEmail = rec.contactEmail || rec.email || rec.Email;
-      if (cName || cEmail) {
-        state.contacts.push({ id: uid("c"), leadId: lead.id, name: cName || "", role: rec.contactRole || "", email: cEmail || "", linkedin: rec.linkedin || "", instagram: rec.instagram || "" });
-      }
-      added++;
+  // Column aliases so exports from Vibe Prospecting, Apollo, and this app's
+  // own CSV all import without editing headers. Matching is case-insensitive.
+  const COLS = {
+    company: ["name", "company", "company name", "business_name", "prospect_company_name", "account name", "organization", "agency"],
+    website: ["website", "company website", "business_website", "business_domain", "prospect_company_website", "domain", "url"],
+    location: ["location", "city", "company city", "business_city_name"],
+    size: ["size", "# employees", "employees", "business_number_of_employees_range", "company size"],
+    niche: ["niche", "industry", "business_naics_description"],
+    services: ["services"],
+    tags: ["tags"],
+    status: ["status"],
+    source: ["source"],
+    notes: ["notes", "reason", "why", "signal", "reason to contact"],
+    contactName: ["contactname", "contact", "full name", "prospect_full_name"],
+    firstName: ["first name", "first_name", "prospect_first_name"],
+    lastName: ["last name", "last_name", "prospect_last_name"],
+    role: ["contactrole", "title", "job title", "prospect_job_title"],
+    email: ["contactemail", "email", "work email", "contact_professional_email"],
+    emailStatus: ["email status", "email_status", "contact_professional_email_status"],
+    linkedin: ["linkedin", "person linkedin url", "linkedin url", "prospect_linkedin"],
+  };
+
+  function pick(rec, key) {
+    for (const alias of COLS[key]) {
+      const v = rec[alias];
+      if (v) return v;
+    }
+    return "";
+  }
+
+  function domainOf(url) {
+    return String(url || "").toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split(/[\/?#]/)[0];
+  }
+
+  function withScheme(url) {
+    return url && !/^https?:/i.test(url) ? "https://" + url : url;
+  }
+
+  function normName(name) {
+    return String(name || "").toLowerCase().replace(/[,.]/g, "").replace(/\b(inc|llc|co|corp|ltd)\b/g, "").replace(/\s+/g, " ").trim();
+  }
+
+  function localISO(d) {
+    const p = (n) => String(n).padStart(2, "0");
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  }
+
+  const FIRST_TOUCH = "Send first email";
+
+  // Spreads first-touch tasks over weekdays, at most perDay per day. Counts
+  // first-touch tasks already scheduled so repeat imports don't pile up.
+  function scheduler(perDay) {
+    const used = {};
+    state.tasks.forEach((t) => {
+      if (!t.done && t.title === FIRST_TOUCH) used[t.dueDate] = (used[t.dueDate] || 0) + 1;
     });
+    const d = new Date();
+    return function next() {
+      while (d.getDay() === 0 || d.getDay() === 6 || (used[localISO(d)] || 0) >= perDay) d.setDate(d.getDate() + 1);
+      const iso = localISO(d);
+      used[iso] = (used[iso] || 0) + 1;
+      return iso;
+    };
+  }
+
+  // Groups rows by company, merges into existing leads (matched by domain or
+  // name), skips contacts already stored, and schedules one first-touch task
+  // per new lead. Returns a summary for the UI.
+  function importLeadsCSV(text, opts) {
+    opts = opts || {};
+    const perDay = Math.max(1, Number(opts.perDay) || 20);
+    const records = parseCSV(text).map((rec) => {
+      const lower = {};
+      Object.keys(rec).forEach((k) => (lower[k.toLowerCase()] = rec[k]));
+      return lower;
+    });
+    const result = { rows: records.length, leadsAdded: 0, leadsMerged: 0, contactsAdded: 0, duplicateContacts: 0, skipped: 0, firstDay: "", lastDay: "" };
+    const nextDay = scheduler(perDay);
+    const added = new Set();
+    const merged = new Set();
+
+    records.forEach((rec) => {
+      const company = pick(rec, "company");
+      const website = pick(rec, "website");
+      if (!company && !website) { result.skipped++; return; }
+      const domain = domainOf(website);
+      const nname = normName(company);
+
+      let lead = state.leads.find((l) => (domain && domainOf(l.website) === domain) || (nname && normName(l.name) === nname));
+      if (lead && !added.has(lead.id)) merged.add(lead.id);
+      if (!lead) {
+        const tags = splitList(pick(rec, "tags"));
+        if (opts.tag && tags.indexOf(opts.tag) < 0) tags.unshift(opts.tag);
+        const status = pick(rec, "status");
+        lead = addLeadSilent({
+          name: company || domain,
+          website: withScheme(website),
+          niche: pick(rec, "niche"),
+          location: pick(rec, "location"),
+          size: pick(rec, "size"),
+          services: splitList(pick(rec, "services")),
+          tags,
+          status: STATUSES.indexOf(status) >= 0 ? status : "Ready to contact",
+          source: opts.source || pick(rec, "source") || "CSV import",
+          notes: pick(rec, "notes"),
+        });
+        added.add(lead.id);
+        if (lead.status === "Ready to contact") {
+          const due = nextDay();
+          state.tasks.push({ id: uid("t"), leadId: lead.id, title: FIRST_TOUCH, dueDate: due, done: false });
+          if (!result.firstDay) result.firstDay = due;
+          result.lastDay = due;
+        }
+      }
+
+      const name = pick(rec, "contactName") || [pick(rec, "firstName"), pick(rec, "lastName")].filter(Boolean).join(" ");
+      const email = pick(rec, "email").toLowerCase();
+      if (!name && !email) return;
+      const dup = state.contacts.some((c) => c.leadId === lead.id && (email ? (c.email || "").toLowerCase() === email : c.name === name));
+      if (dup) { result.duplicateContacts++; return; }
+      state.contacts.push({
+        id: uid("c"), leadId: lead.id, name, role: pick(rec, "role"), email,
+        emailStatus: pick(rec, "emailStatus").toLowerCase(),
+        linkedin: withScheme(pick(rec, "linkedin")), instagram: "",
+      });
+      result.contactsAdded++;
+    });
+
+    result.leadsAdded = added.size;
+    result.leadsMerged = merged.size;
     notify();
-    return added;
+    return result;
+  }
+
+  // -- Sample data ----------------------------------------------------------
+  function sampleLeadIds() {
+    return ((window.SEED && window.SEED.leads) || []).map((l) => l.id);
+  }
+  function hasSampleData() {
+    const ids = sampleLeadIds();
+    return state.leads.some((l) => ids.indexOf(l.id) >= 0);
+  }
+  function removeSampleData() {
+    const ids = new Set(sampleLeadIds());
+    const keep = (x) => !ids.has(x.leadId);
+    state.leads = state.leads.filter((l) => !ids.has(l.id));
+    state.contacts = state.contacts.filter(keep);
+    state.activities = state.activities.filter(keep);
+    state.opportunities = state.opportunities.filter(keep);
+    state.tasks = state.tasks.filter(keep);
+    notify();
   }
 
   function splitList(v) {
@@ -558,5 +685,7 @@
     metrics, nextAction,
     // io
     exportJSON, importJSON, exportLeadsCSV, importLeadsCSV,
+    // sample data
+    hasSampleData, removeSampleData,
   };
 })();
